@@ -51,10 +51,10 @@ class PathPlan(Node):
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
 
     def map_cb(self, msg):
-        raise NotImplementedError
+        self.get_logger().info('Data logged: %s' % msg.data)
 
     def pose_cb(self, pose):
-        raise NotImplementedError
+        self.get_logger().info('Data logged: %s' % pose.data)
 
     def goal_cb(self, msg):
         raise NotImplementedError

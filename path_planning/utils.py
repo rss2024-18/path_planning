@@ -7,6 +7,8 @@ from std_msgs.msg import Header
 import os
 from typing import List, Tuple
 import json
+from tf_transformations import euler_from_quaternion
+from collections import deque
 
 EPSILON = 0.00000000001
 
@@ -235,3 +237,72 @@ class LineTrajectory:
         header.stamp = stamp
         header.frame_id = frame_id
         return header
+
+# class Coordinate2D:
+#     """
+#     2D coordinate object used in Map representation
+#     """
+#     def __init__(self, x: float=0.0, y: float=0.0):
+#         self.x = x
+#         self.y = y
+
+#     def __str__(self):
+#         return f"({self.x}, {self.y})"
+
+#     def __eq__(self, other):
+#         return self.x == other.x and self.y == other.y
+    
+#     def scalar_multiply(self, scalar):
+#         return Coordinate2D(self.x * scalar, self.y * scalar)
+
+class Map:
+    """
+    2D map discretization Abstract Data Type
+    """
+    def __init__(self, msg) -> None:
+        
+        self.height = msg.info.height
+        self.width = msg.info.width
+        self.resolution = msg.info.resolution
+        orientation = msg.info.origin.orientation
+        poseOrientation = [orientation.x, orientation.y, orientation.z, orientation.z]
+        self.angles = euler_from_quaternion(poseOrientation)
+        self.posePoint = np.array([[msg.info.origin.position.x], [msg.info.origin.position.y], [msg.info.origin.position.z]])
+        self.data = np.reshape(np.array(msg.data), (self.height, self.width))
+
+    def z_axis_rotation_matrix(self, yaw):
+        return np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+
+    def pixel_to_real(self, pixelCoord: Tuple[float, float]) -> Tuple[float, float]:
+        pixelCoord = [i*self.resolution for i in pixelCoord]
+        rotatedCoord = np.array([pixelCoord[0]], [pixelCoord[1]], [0.0]) * self.z_axis_rotation_matrix(self.angles[2])
+        rotatedCoord = rotatedCoord + self.posePoint
+        return (rotatedCoord[0, 0], rotatedCoord[1, 0])      
+
+    def real_to_pixel(self, realCoord: Tuple[float, float]) -> Tuple[float, float]:
+        translatedCoord = np.array([[realCoord[0]], [realCoord[1]], [0.0]]) - self.posePoint
+        rotatedCoord = np.array([translatedCoord[0]], [translatedCoord[1]], [0.0]) * self.z_axis_rotation_matrix(self.angles[2])
+        rotatedCoord = rotatedCoord / self.resolution
+        return (rotatedCoord[0, 0], rotatedCoord[1, 0]) 
+    
+    def get_pixel(self, u, v):
+        return self.data[v, u]
+    
+    def bfs(self, start, end):
+        visited = set()        # To keep track of visited nodes
+        queue = deque([(start, [start])]) # Initialize a queue with the starting node
+        
+        while queue:
+            node, path = queue.popleft() # Get the first node and its path from the queue
+            if node == end:
+                return path  # Return the path if the end node is reached
+                
+            if node not in visited:
+                visited.add(node)  # Mark the node as visited
+                
+                # Add unvisited neighbors of the current node to the queue
+                for neighbor in graph[node]:
+                    if neighbor not in visited:
+                        queue.append((neighbor, path + [neighbor]))
+
+        
