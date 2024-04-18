@@ -9,6 +9,7 @@ from typing import List, Tuple
 import json
 from tf_transformations import euler_from_quaternion
 from collections import deque
+import math
 
 EPSILON = 0.00000000001
 
@@ -29,9 +30,9 @@ class LineTrajectory:
 
         if viz_namespace:
             self.visualize = True
-            self.start_pub = self.node.create_publisher(Marker, viz_namespace + "/start_point", 1)
+            self.start_point_pub = self.node.create_publisher(Marker, viz_namespace + "/start_point_point", 1)
             self.traj_pub = self.node.create_publisher(Marker, viz_namespace + "/path", 1)
-            self.end_pub = self.node.create_publisher(Marker, viz_namespace + "/end_pose", 1)
+            self.end_point_pub = self.node.create_publisher(Marker, viz_namespace + "/end_point_pose", 1)
 
     # compute the distances along the path for all path segments beyond those already computed
     def update_distances(self):
@@ -40,14 +41,14 @@ class LineTrajectory:
 
         for i in range(num_distances, num_points):
             if i == 0:
-                self.distances.append(0)
+                self.distances.append_point(0)
             else:
                 p0 = self.points[i - 1]
                 p1 = self.points[i]
                 delta = np.array([p0[0] - p1[0], p0[1] - p1[1]])
-                self.distances.append(self.distances[i - 1] + np.linalg.norm(delta))
+                self.distances.append_point(self.distances[i - 1] + np.linalg.norm(delta))
 
-    def distance_to_end(self, t):
+    def distance_to_end_point(self, t):
         if not len(self.points) == len(self.distances):
             print(
                 "WARNING: Different number of distances and points, this should never happen! Expect incorrect results. See LineTrajectory class.")
@@ -71,7 +72,7 @@ class LineTrajectory:
 
     def addPoint(self, point: Tuple[float, float]) -> None:
         print("adding point to trajectory:", point)
-        self.points.append(point)
+        self.points.append_point(point)
         self.update_distances()
         self.mark_dirty()
 
@@ -88,7 +89,7 @@ class LineTrajectory:
         data = {}
         data["points"] = []
         for p in self.points:
-            data["points"].append({"x": p[0], "y": p[1]})
+            data["points"].append_point({"x": p[0], "y": p[1]})
         with open(path, 'w') as outfile:
             json.dump(data, outfile)
 
@@ -107,7 +108,7 @@ class LineTrajectory:
         with open(path) as json_file:
             json_data = json.load(json_file)
             for p in json_data["points"]:
-                self.points.append((p["x"], p["y"]))
+                self.points.append_point((p["x"], p["y"]))
         self.update_distances()
         print("Loaded:", len(self.points), "points")
         self.mark_dirty()
@@ -115,7 +116,7 @@ class LineTrajectory:
     # build a trajectory class instance from a trajectory message
     def fromPoseArray(self, trajMsg):
         for p in trajMsg.poses:
-            self.points.append((p.position.x, p.position.y))
+            self.points.append_point((p.position.x, p.position.y))
         self.update_distances()
         self.mark_dirty()
         print("Loaded new trajectory with:", len(self.points), "points")
@@ -128,14 +129,14 @@ class LineTrajectory:
             pose = Pose()
             pose.position.x = p[0]
             pose.position.y = p[1]
-            traj.poses.append(pose)
+            traj.poses.append_point(pose)
         return traj
 
-    def publish_start_point(self, duration=0.0, scale=0.1):
+    def publish_start_point_point(self, duration=0.0, scale=0.1):
         should_publish = len(self.points) > 0
-        self.node.get_logger().info("Before Publishing start point")
-        if self.visualize and self.start_pub.get_subscription_count() > 0:
-            self.node.get_logger().info("Publishing start point")
+        self.node.get_logger().info("Before Publishing start_point point")
+        if self.visualize and self.start_point_pub.get_subscription_count() > 0:
+            self.node.get_logger().info("Publishing start_point point")
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -158,13 +159,13 @@ class LineTrajectory:
                 # delete marker
                 marker.action = 2
 
-            self.start_pub.publish(marker)
-        elif self.start_pub.get_subscription_count() == 0:
-            self.node.get_logger().info("Not publishing start point, no subscribers")
+            self.start_point_pub.publish(marker)
+        elif self.start_point_pub.get_subscription_count() == 0:
+            self.node.get_logger().info("Not publishing start_point point, no subscribers")
 
-    def publish_end_point(self, duration=0.0):
+    def publish_end_point_point(self, duration=0.0):
         should_publish = len(self.points) > 1
-        if self.visualize and self.end_pub.get_subscription_count() > 0:
+        if self.visualize and self.end_point_pub.get_subscription_count() > 0:
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -187,9 +188,9 @@ class LineTrajectory:
                 # delete marker
                 marker.action = 2
 
-            self.end_pub.publish(marker)
-        elif self.end_pub.get_subscription_count() == 0:
-            print("Not publishing end point, no subscribers")
+            self.end_point_pub.publish(marker)
+        elif self.end_point_pub.get_subscription_count() == 0:
+            print("Not publishing end_point point, no subscribers")
 
     def publish_trajectory(self, duration=0.0):
         should_publish = len(self.points) > 1
@@ -213,7 +214,7 @@ class LineTrajectory:
                     pt.x = p[0]
                     pt.y = p[1]
                     pt.z = 0.0
-                    marker.points.append(pt)
+                    marker.points.append_point(pt)
             else:
                 # delete
                 marker.action = marker.DELETE
@@ -226,9 +227,9 @@ class LineTrajectory:
         if not self.visualize:
             print("Cannot visualize path, not initialized with visualization enabled")
             return
-        self.publish_start_point(duration=duration)
+        self.publish_start_point_point(duration=duration)
         self.publish_trajectory(duration=duration)
-        self.publish_end_point(duration=duration)
+        self.publish_end_point_point(duration=duration)
 
     def make_header(self, frame_id, stamp=None):
         if stamp == None:
@@ -288,21 +289,37 @@ class Map:
     def get_pixel(self, u, v):
         return self.data[v, u]
     
-    def bfs(self, start, end):
-        visited = set()        # To keep track of visited nodes
-        queue = deque([(start, [start])]) # Initialize a queue with the starting node
+    def bfs(self, start_point, end_point):
+
+        start_point = self.discretization(start_point.x, start_point.y)
+        end_point = self.discretization(end_point.x, end_point.y)
+
+        visited = set() 
+        queue = deque([(start_point, [start_point])])
         
         while queue:
-            node, path = queue.popleft() # Get the first node and its path from the queue
-            if node == end:
-                return path  # Return the path if the end node is reached
+            node, path = queue.popleft()
+            if node == end_point:
+                return path
                 
             if node not in visited:
-                visited.add(node)  # Mark the node as visited
+                visited.add(node)
                 
-                # Add unvisited neighbors of the current node to the queue
-                for neighbor in graph[node]:
+                for neighbor in self.get_neighbors(node[0], node[1]):
                     if neighbor not in visited:
                         queue.append((neighbor, path + [neighbor]))
 
-        
+    def discretization(self, x, y):
+        return (math.floor(x) + 0.5, math.floor(y) + 0.5)
+
+    def get_neighbors(self, x, y):
+        neighbors = []
+        directions = [(-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)]
+
+        for dx, dy in directions:
+            nx, ny = x + dx, y + dy
+            u, v = self.real_to_pixel(nx, ny)
+            if 0 <= u < self.width and 0 <= v < self.height and self.get_pixel(u, v) == 0:
+                neighbors.append((nx, ny))
+
+        return neighbors

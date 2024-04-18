@@ -4,7 +4,7 @@ from rclpy.node import Node
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
-from .utils import LineTrajectory
+from .utils import LineTrajectory, Map
 
 
 class PathPlan(Node):
@@ -49,17 +49,23 @@ class PathPlan(Node):
         )
 
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
+        self.start = None
+        self.end = None
+        self.map = None
 
     def map_cb(self, msg):
-        self.get_logger().info('Data logged: %s' % msg.data)
+        self.map = Map(msg)
 
     def pose_cb(self, pose):
-        self.get_logger().info('Data logged: %s' % pose.data)
+        self.start = (pose.pose.position.x, pose.pose.position.y)
 
     def goal_cb(self, msg):
-        raise NotImplementedError
+        self.end = (msg.point.x, msg.point.y)
+        if self.map is not None and self.start is not None:
+            path = self.plan_path()
 
     def plan_path(self, start_point, end_point, map):
+
         self.traj_pub.publish(self.trajectory.toPoseArray())
         self.trajectory.publish_viz()
 
