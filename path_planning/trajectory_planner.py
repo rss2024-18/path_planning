@@ -81,6 +81,13 @@ class PathPlan(Node):
             10
         )
 
+        self.dumb_pub = self.create_publisher(
+            PoseArray,
+            "/trajectory/rand",
+            10
+        )
+
+        #"/trajectory/current",
         self.pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
             self.initial_pose_topic,
@@ -109,6 +116,7 @@ class PathPlan(Node):
             #self.get_logger().info("trajectory already found")
             return
         nodes = []
+        dumb_points = []
         self.t = self.t + 1
         for it in range(self.num_iter):
             no_valid_point =True
@@ -138,7 +146,7 @@ class PathPlan(Node):
                         closest_node = node
 
             #steer
-            new_node = self.steer(x, y, theta, closest_node)
+            new_node, dumb_points = self.steer(x, y, theta, closest_node, dumb_points)
             if new_node is not None:
                 nodes.append(new_node)
             else:
@@ -146,7 +154,7 @@ class PathPlan(Node):
             #check if node is within distance of end 
             end_disp = math.sqrt((new_node.x-self.end_x)**2 + (new_node.y-self.end_y)**2)
             if end_disp<self.step_size:
-                end_node = self.steer(self.end_x, self.end_y, self.end_theta, new_node)
+                end_node, dumb_points = self.steer(self.end_x, self.end_y, self.end_theta, new_node, dumb_points)
                 if end_node is not None: #we have found a trajectory
                     nodes.append(end_node)
                     current_node = end_node
@@ -155,15 +163,17 @@ class PathPlan(Node):
                         trajectory.append(current_node)
                         current_node = current_node.parent
                     self.working_trajectory = trajectory
-                    self.visualize_tree(trajectory)
+                    self.plan_path(trajectory)
                     self.find_traj = False
+                    self.publish_dumb_pose_array(dumb_points)
                     self.get_logger().info("path length: " +str(len(trajectory)))
                     self.nodes = 0
                     return   
-        self.visualize_tree(nodes)           
+       #pose_paths = self.create_pose_array(nodes)   
+       #self.traj_pub.publish(pose_paths)        
     
 
-    def steer(self, goal_x, goal_y, goal_theta, parent):
+    def steer(self, goal_x, goal_y, goal_theta, parent, dumb_points):
         if parent is not None:
             start_x = parent.x
             start_y = parent.y
@@ -172,76 +182,48 @@ class PathPlan(Node):
             start_x = self.start_x
             start_y = self.start_y
             start_theta = self.start_theta
-            
-        angle_to_target = math.atan2(goal_y - start_y, goal_x - start_x)
-        
-        orientation_diff = min(self.max_steer, abs(angle_to_target - start_theta))
 
-        if angle_to_target - start_theta < 0:
-            orientation_diff = -orientation_diff
-
-        new_orientation = start_theta + orientation_diff
-        
-        # Calculate the new position using the step size and the new orientation
-        new_x = start_x + self.step_size * math.cos(new_orientation)
-        new_y = start_y + self.step_size * math.sin(new_orientation)
-        
-        # Normalize the orientation to stay within [-pi, pi]
-        new_orientation = (new_orientation + math.pi) % (2 * math.pi) - math.pi
-        
         #check if path is collision free
-        collision_free = self.check_collision(new_x, new_y, start_x, start_y)
+        collision_free, dumb_points = self.check_collision(goal_x, goal_y, start_x, start_y, dumb_points)
 
         if collision_free:
             # Create a new node with the new position and orientation
-            new_node = pathNode(new_x, new_y, goal_theta, parent, self.nodes)
+            new_node = pathNode(goal_x, goal_y, goal_theta, parent, self.nodes)
             self.nodes += 1
-            return new_node
+            return (new_node, dumb_points)
         else:
-            return None
+            return (None, dumb_points)
 
-    def check_collision(self, new_x, new_y, parent_x, parent_y):
+    def check_collision(self, new_x, new_y, parent_x, parent_y, dumb_points):
         #path moves from parent to new
         #create a list of all the points we need to check
         total_dist = math.sqrt((new_x-parent_x)**2 + (new_y-parent_y)**2)
         num_iter = int(total_dist/self.collision_step_size)
         points = []
 
-        # Calculate direction vector components and a perpendicular vector for the width
+        # # Calculate direction vector components
         direction_x = new_x - parent_x
         direction_y = new_y - parent_y
-        norm = math.sqrt(direction_x ** 2 + direction_y ** 2)
-
-        # Normalize direction vector
-        dir_x = direction_x / norm
-        dir_y = direction_y / norm
-        
-        # Compute perpendicular (normal) vector to the direction
-        perp_x = -dir_y
-        perp_y = dir_x
 
         for i in range(num_iter+1):
             # Calculate intermediate point along the line
             t = self.collision_step_size * i / total_dist
             base_x = parent_x + t * direction_x
             base_y = parent_y + t * direction_y
+            self.get_logger().info(str((base_x, base_y)))
+            points.append((base_x, base_y))
         
-            # Add points across the width of the path
-            for offset in np.linspace(-self.path_width / 2, self.path_width / 2, num=int(self.path_width/self.collision_width_ss)):  
-                x = base_x + offset * perp_x
-                y = base_y + offset * perp_y
-                points.append((x, y))
-
         no_collision = True
         for point in points:
             x = point[0]
             y = point[1]
             uv = self.xy_to_uv(x,y)
+            dumb_points.append((x,y))
             if self.map_data[uv[1], uv[0]] > 0:
                 no_collision = False
                 break
         
-        return no_collision
+        return (no_collision, dumb_points)
     
     def xy_to_uv(self, x, y):
         xtrans = x-self.position.x
@@ -287,6 +269,7 @@ class PathPlan(Node):
         eul = rot.as_euler('xyz')
         self.start_theta = eul[2]
         self.find_traj = True
+        self.trajectory.clear()
 
 
     def goal_cb(self, msg):
@@ -301,13 +284,33 @@ class PathPlan(Node):
         eul = rot.as_euler('xyz')
         self.end_theta = eul[2]
         self.find_traj = True
+        self.trajectory.clear()
         self.get_logger().info(str(self.end_x)+" "+str(self.end_y))
 
-    def plan_path(self, start_point, end_point, map):
+    def plan_path(self, path):
+        #create trajectory 
+        trajectory = self.create_pose_array(path)
+        self.trajectory.fromPoseArray(trajectory)
         self.traj_pub.publish(self.trajectory.toPoseArray())
         self.trajectory.publish_viz()
+    
+    def publish_dumb_pose_array(self, points):
+        poses = PoseArray()
+        for point in points:
+            rot = R.from_euler("xyz", [0, 0, 0])
+            quat = rot.as_quat()
+            xq = quat[0]
+            yq = quat[1]
+            zq = quat[2]
+            wq = quat[3]
+            pose = Pose(position = Point(x=point[0], y=point[1],z=0.1), orientation=Quaternion(x=xq, y=yq, z=zq, w=wq))
+            poses.poses.append(pose)
+        self.dumb_pub.publish(poses)
 
-    def visualize_tree(self, nodes):
+
+    def create_pose_array(self, nodes):
+        nodes.append(pathNode(self.start_x, self.start_y, self.start_theta, nodenumber = 0))
+        nodes.reverse()
         paths = PoseArray()
         paths.header.frame_id = "map"
         paths.header.stamp = self.get_clock().now().to_msg()
@@ -315,7 +318,7 @@ class PathPlan(Node):
         theta = 0.0
         for node in nodes:
             if last_node is not None:
-                theta  = math.atan2(last_node.y - node.y, last_node.x - node.x)
+                theta  = math.atan2(node.y - last_node.y, node.x - last_node.x)
             else:
                 theta = node.theta
             rot = R.from_euler("xyz", [0, 0, theta])
@@ -327,8 +330,8 @@ class PathPlan(Node):
             pose = Pose(position = Point(x=node.x, y=node.y,z=0.1), orientation=Quaternion(x=xq, y=yq, z=zq, w=wq))
             paths.poses.append(pose)
             last_node = node
-
-        self.traj_pub.publish(paths)
+        return paths
+        #self.traj_pub.publish(paths)
 
 
 class pathNode:
