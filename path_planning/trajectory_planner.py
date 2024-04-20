@@ -77,16 +77,9 @@ class PathPlan(Node):
 
         self.traj_pub = self.create_publisher(
             PoseArray,
-            "/trajectory/current",
+            "/planned_trajectory/path",
             10
         )
-
-        self.dumb_pub = self.create_publisher(
-            PoseArray,
-            "/trajectory/rand",
-            10
-        )
-
         #"/trajectory/current",
         self.pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
@@ -116,7 +109,6 @@ class PathPlan(Node):
             #self.get_logger().info("trajectory already found")
             return
         nodes = []
-        dumb_points = []
         self.t = self.t + 1
         for it in range(self.num_iter):
             no_valid_point =True
@@ -146,7 +138,7 @@ class PathPlan(Node):
                         closest_node = node
 
             #steer
-            new_node, dumb_points = self.steer(x, y, theta, closest_node, dumb_points)
+            new_node = self.steer(x, y, theta, closest_node)
             if new_node is not None:
                 nodes.append(new_node)
             else:
@@ -154,7 +146,7 @@ class PathPlan(Node):
             #check if node is within distance of end 
             end_disp = math.sqrt((new_node.x-self.end_x)**2 + (new_node.y-self.end_y)**2)
             if end_disp<self.step_size:
-                end_node, dumb_points = self.steer(self.end_x, self.end_y, self.end_theta, new_node, dumb_points)
+                end_node = self.steer(self.end_x, self.end_y, self.end_theta, new_node)
                 if end_node is not None: #we have found a trajectory
                     nodes.append(end_node)
                     current_node = end_node
@@ -165,7 +157,6 @@ class PathPlan(Node):
                     self.working_trajectory = trajectory
                     self.plan_path(trajectory)
                     self.find_traj = False
-                    self.publish_dumb_pose_array(dumb_points)
                     self.get_logger().info("path length: " +str(len(trajectory)))
                     self.nodes = 0
                     return   
@@ -173,7 +164,7 @@ class PathPlan(Node):
        #self.traj_pub.publish(pose_paths)        
     
 
-    def steer(self, goal_x, goal_y, goal_theta, parent, dumb_points):
+    def steer(self, goal_x, goal_y, goal_theta, parent):
         if parent is not None:
             start_x = parent.x
             start_y = parent.y
@@ -184,17 +175,17 @@ class PathPlan(Node):
             start_theta = self.start_theta
 
         #check if path is collision free
-        collision_free, dumb_points = self.check_collision(goal_x, goal_y, start_x, start_y, dumb_points)
+        collision_free = self.check_collision(goal_x, goal_y, start_x, start_y)
 
         if collision_free:
             # Create a new node with the new position and orientation
             new_node = pathNode(goal_x, goal_y, goal_theta, parent, self.nodes)
             self.nodes += 1
-            return (new_node, dumb_points)
+            return new_node
         else:
-            return (None, dumb_points)
+            return None
 
-    def check_collision(self, new_x, new_y, parent_x, parent_y, dumb_points):
+    def check_collision(self, new_x, new_y, parent_x, parent_y):
         #path moves from parent to new
         #create a list of all the points we need to check
         total_dist = math.sqrt((new_x-parent_x)**2 + (new_y-parent_y)**2)
@@ -210,7 +201,6 @@ class PathPlan(Node):
             t = self.collision_step_size * i / total_dist
             base_x = parent_x + t * direction_x
             base_y = parent_y + t * direction_y
-            self.get_logger().info(str((base_x, base_y)))
             points.append((base_x, base_y))
         
         no_collision = True
@@ -218,12 +208,12 @@ class PathPlan(Node):
             x = point[0]
             y = point[1]
             uv = self.xy_to_uv(x,y)
-            dumb_points.append((x,y))
             if self.map_data[uv[1], uv[0]] > 0:
+                self.get_logger().info("COLLISION")
                 no_collision = False
                 break
         
-        return (no_collision, dumb_points)
+        return no_collision
     
     def xy_to_uv(self, x, y):
         xtrans = x-self.position.x
@@ -293,20 +283,6 @@ class PathPlan(Node):
         self.trajectory.fromPoseArray(trajectory)
         self.traj_pub.publish(self.trajectory.toPoseArray())
         self.trajectory.publish_viz()
-    
-    def publish_dumb_pose_array(self, points):
-        poses = PoseArray()
-        for point in points:
-            rot = R.from_euler("xyz", [0, 0, 0])
-            quat = rot.as_quat()
-            xq = quat[0]
-            yq = quat[1]
-            zq = quat[2]
-            wq = quat[3]
-            pose = Pose(position = Point(x=point[0], y=point[1],z=0.1), orientation=Quaternion(x=xq, y=yq, z=zq, w=wq))
-            poses.poses.append(pose)
-        self.dumb_pub.publish(poses)
-
 
     def create_pose_array(self, nodes):
         nodes.append(pathNode(self.start_x, self.start_y, self.start_theta, nodenumber = 0))
