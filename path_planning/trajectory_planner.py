@@ -57,15 +57,22 @@ class PathPlan(Node):
         self.map = Map(msg)
 
     def pose_cb(self, pose):
-        self.start = (pose.pose.position.x, pose.pose.position.y)
+        self.start = (pose.pose.pose.position.x, pose.pose.pose.position.y)
 
     def goal_cb(self, msg):
         self.end = (msg.point.x, msg.point.y)
         if self.map is not None and self.start is not None:
-            path = self.plan_path()
+            self.plan_path()
 
-    def plan_path(self, start_point, end_point, map):
-
+    def plan_path(self):
+        path = self.map.bfs(self.start, self.end)
+        self.trajectory.clear()
+        if len(path) > 0:
+            for point in path:
+                self.trajectory.addPoint(point)
+        else:
+            self.get_logger().info("path not found")
+            return
         self.traj_pub.publish(self.trajectory.toPoseArray())
         self.trajectory.publish_viz()
 
