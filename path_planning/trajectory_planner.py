@@ -40,18 +40,19 @@ class PathPlan(Node):
 
         self.end_x = 0.0
         self.end_y = 0.0
-        self.goal_theta = 0.0
+        self.end_theta = 0.0
 
-        self.x_min = -60.0
-        self.x_max = 25.0
-        self.y_min = -20.0
-        self.y_max = 50.0
+        self.x_min = -45.0
+        self.x_max = 15.0
+        self.y_min = -15.0
+        self.y_max = 45.0
 
-        self.max_steer = math.pi
-        self.step_size = 1.5
-        self.collision_step_size = 0.05
-        self.num_iter = 200
-        self.path_width = 0.1
+        self.max_steer = math.pi/2
+        self.step_size = 0.5
+        self.collision_step_size = 0.25
+        self.collision_width_ss = 0.1
+        self.num_iter = 400
+        self.path_width = 0.4
         self.nodes = 0
 
         self.map_sub = self.create_subscription(
@@ -88,23 +89,42 @@ class PathPlan(Node):
         )
 
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
-        timer_period = 1/10 #seconds
+        timer_period = 1/1 #seconds
         self.t = 0
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
     def timer_callback(self):
         if self.map_data is None:
             return
+        #obstacle checking
+        # x = self.end_x
+        # y= self.end_y
+        # uv = self.xy_to_uv(x,y)
+        # if self.map_data[uv[1], uv[0]] == 0:
+        #     self.get_logger().info("valid point")
+        # else:
+        #     self.get_logger().info("obstacle")
+        # return
         if not self.find_traj:
             #self.get_logger().info("trajectory already found")
             return
         nodes = []
         self.t = self.t + 1
         for it in range(self.num_iter):
-            #generate random point
-            x = random.uniform(self.x_min, self.x_max)
-            y = random.uniform(self.y_min, self.y_max)
-            theta = random.uniform(-math.pi, math.pi)
+            no_valid_point =True
+            x = None
+            y = None
+            theta = None
+            while no_valid_point:
+                #generate random point
+                x = random.uniform(self.x_min, self.x_max)
+                y = random.uniform(self.y_min, self.y_max)
+                theta = random.uniform(-math.pi/2, math.pi/2)
+                #check if point is not in an obstacle
+                uv = self.xy_to_uv(x,y)
+                if self.map_data[uv[1], uv[0]] == 0:
+                    no_valid_point = False
+
 
             shortest_dist = 10000
             closest_node = None
@@ -126,7 +146,7 @@ class PathPlan(Node):
             #check if node is within distance of end 
             end_disp = math.sqrt((new_node.x-self.end_x)**2 + (new_node.y-self.end_y)**2)
             if end_disp<self.step_size:
-                end_node = self.steer(self.end_x, self.end_y, new_node)
+                end_node = self.steer(self.end_x, self.end_y, self.end_theta, new_node)
                 if end_node is not None: #we have found a trajectory
                     nodes.append(end_node)
                     current_node = end_node
@@ -156,9 +176,10 @@ class PathPlan(Node):
         angle_to_target = math.atan2(goal_y - start_y, goal_x - start_x)
         
         orientation_diff = min(self.max_steer, abs(angle_to_target - start_theta))
+
         if angle_to_target - start_theta < 0:
             orientation_diff = -orientation_diff
-        
+
         new_orientation = start_theta + orientation_diff
         
         # Calculate the new position using the step size and the new orientation
@@ -170,6 +191,7 @@ class PathPlan(Node):
         
         #check if path is collision free
         collision_free = self.check_collision(new_x, new_y, start_x, start_y)
+
         if collision_free:
             # Create a new node with the new position and orientation
             new_node = pathNode(new_x, new_y, goal_theta, parent, self.nodes)
@@ -205,7 +227,7 @@ class PathPlan(Node):
             base_y = parent_y + t * direction_y
         
             # Add points across the width of the path
-            for offset in np.linspace(-self.path_width / 2, self.path_width / 2, num=int(self.path_width/self.collision_step_size)):  
+            for offset in np.linspace(-self.path_width / 2, self.path_width / 2, num=int(self.path_width/self.collision_width_ss)):  
                 x = base_x + offset * perp_x
                 y = base_y + offset * perp_y
                 points.append((x, y))
@@ -279,6 +301,7 @@ class PathPlan(Node):
         eul = rot.as_euler('xyz')
         self.end_theta = eul[2]
         self.find_traj = True
+        self.get_logger().info(str(self.end_x)+" "+str(self.end_y))
 
     def plan_path(self, start_point, end_point, map):
         self.traj_pub.publish(self.trajectory.toPoseArray())
@@ -288,8 +311,14 @@ class PathPlan(Node):
         paths = PoseArray()
         paths.header.frame_id = "map"
         paths.header.stamp = self.get_clock().now().to_msg()
+        last_node = None
+        theta = 0.0
         for node in nodes:
-            rot = R.from_euler("xyz", [0, 0, node.theta])
+            if last_node is not None:
+                theta  = math.atan2(last_node.y - node.y, last_node.x - node.x)
+            else:
+                theta = node.theta
+            rot = R.from_euler("xyz", [0, 0, theta])
             quat = rot.as_quat()
             xq = quat[0]
             yq = quat[1]
@@ -297,6 +326,7 @@ class PathPlan(Node):
             wq = quat[3]
             pose = Pose(position = Point(x=node.x, y=node.y,z=0.1), orientation=Quaternion(x=xq, y=yq, z=zq, w=wq))
             paths.poses.append(pose)
+            last_node = node
 
         self.traj_pub.publish(paths)
 
