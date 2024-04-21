@@ -42,18 +42,20 @@ class PathPlan(Node):
         self.end_y = 0.0
         self.end_theta = 0.0
 
-        self.x_min = -45.0
-        self.x_max = 15.0
+        self.x_min = -60.0
+        self.x_max = 25.0
         self.y_min = -15.0
         self.y_max = 45.0
 
         self.max_steer = math.pi/2
         self.step_size = 0.5
-        self.collision_step_size = 0.25
+        self.collision_step_size = 1.0
         self.collision_width_ss = 0.1
-        self.num_iter = 400
+        self.num_iter = 800
         self.path_width = 0.4
         self.nodes = 0
+
+        self.debug_points = PoseArray()
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -80,6 +82,12 @@ class PathPlan(Node):
             "/planned_trajectory/path",
             10
         )
+        self.rand_pub = self.create_publisher(
+            PoseArray,
+            "/trajectory/current",
+            10
+        )
+
         #"/trajectory/current",
         self.pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
@@ -89,7 +97,7 @@ class PathPlan(Node):
         )
 
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
-        timer_period = 1/1 #seconds
+        timer_period = 1/10 #seconds
         self.t = 0
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
@@ -155,13 +163,16 @@ class PathPlan(Node):
                         trajectory.append(current_node)
                         current_node = current_node.parent
                     self.working_trajectory = trajectory
+                    #self.debug_points.header.frame_id = "map"
+                    #self.debug_points.header.stamp = self.get_clock().now().to_msg()
+                    #self.rand_pub.publish(self.debug_points) 
                     self.plan_path(trajectory)
                     self.find_traj = False
                     self.get_logger().info("path length: " +str(len(trajectory)))
                     self.nodes = 0
                     return   
-       #pose_paths = self.create_pose_array(nodes)   
-       #self.traj_pub.publish(pose_paths)        
+        # pose_paths = self.create_pose_array(nodes)   
+        # self.rand_pub.publish(pose_paths)        
     
 
     def steer(self, goal_x, goal_y, goal_theta, parent):
@@ -202,17 +213,28 @@ class PathPlan(Node):
             base_x = parent_x + t * direction_x
             base_y = parent_y + t * direction_y
             points.append((base_x, base_y))
-        
+
         no_collision = True
         for point in points:
             x = point[0]
             y = point[1]
+
             uv = self.xy_to_uv(x,y)
-            if self.map_data[uv[1], uv[0]] > 0:
-                self.get_logger().info("COLLISION")
+            if self.map_data[uv[1], uv[0]] != 0:
                 no_collision = False
                 break
         
+        if no_collision:
+            for point in points:
+                rot = R.from_euler("xyz", [0, 0, 0])
+                quat = rot.as_quat()
+                xq = quat[0]
+                yq = quat[1]
+                zq = quat[2]
+                wq = quat[3]
+                pose = Pose(position = Point(x=point[0], y=point[1],z=0.1), orientation=Quaternion(x=xq, y=yq, z=zq, w=wq))
+                #self.debug_points.poses.append(pose)
+
         return no_collision
     
     def xy_to_uv(self, x, y):
@@ -260,6 +282,7 @@ class PathPlan(Node):
         self.start_theta = eul[2]
         self.find_traj = True
         self.trajectory.clear()
+        #self.debug_points.poses = []
 
 
     def goal_cb(self, msg):
@@ -276,6 +299,7 @@ class PathPlan(Node):
         self.find_traj = True
         self.trajectory.clear()
         self.get_logger().info(str(self.end_x)+" "+str(self.end_y))
+        #self.debug_points.poses = []
 
     def plan_path(self, path):
         #create trajectory 
