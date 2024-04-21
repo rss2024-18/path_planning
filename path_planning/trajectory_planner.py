@@ -35,7 +35,6 @@ class PathPlan(Node):
         self.start_x = 0.0
         self.start_y = 0.0 
         self.start_theta = 0.0 
-        self.working_trajectory = None
         self.find_traj = True
 
         self.end_x = 0.0
@@ -51,12 +50,14 @@ class PathPlan(Node):
         self.step_size = 0.5
         self.collision_step_size = 1.0
         self.collision_width_ss = 0.1
-        self.num_iter = 800
+        self.num_iter = 1000
         self.path_width = 0.4
         self.nodes = 0
         self.radius = 3.0
 
         self.debug_points = PoseArray()
+        self.best_traj = None
+        self.best_traj_cost = None
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -201,14 +202,20 @@ class PathPlan(Node):
                     while current_node is not None:
                         trajectory.append(current_node)
                         current_node = current_node.parent
-                    self.working_trajectory = trajectory
+
                     #self.debug_points.header.frame_id = "map"
                     #self.debug_points.header.stamp = self.get_clock().now().to_msg()
                     #self.rand_pub.publish(self.debug_points) 
-                    self.plan_path(trajectory)
-                    self.find_traj = False
-                    self.get_logger().info("path length: " +str(len(trajectory)))
-                    self.nodes = 0
+                    #evaluate this trajectory:
+                    new_traj, new_traj_cost = self.backtrack(end_node)
+                    if self.best_traj_cost is None: #this new trajectory is the first we've found
+                        self.best_traj_cost = new_traj_cost
+                        self.best_traj = trajectory
+                        self.runTrajectory(trajectory)
+                    elif new_traj_cost < self.best_traj_cost: #or it is better than the one we've been following
+                        self.best_traj_cost = new_traj_cost
+                        self.best_traj = trajectory
+                        self.runTrajectory(trajectory)
                     return   
         # pose_paths = self.create_pose_array(nodes)   
         # self.rand_pub.publish(pose_paths)        
@@ -320,8 +327,7 @@ class PathPlan(Node):
         rot = R.from_quat((x,y,z,w))
         eul = rot.as_euler('xyz')
         self.start_theta = eul[2]
-        self.find_traj = True
-        self.trajectory.clear()
+        self.reset()
         #self.debug_points.poses = []
 
 
@@ -336,13 +342,13 @@ class PathPlan(Node):
         rot = R.from_quat((x,y,z,w))
         eul = rot.as_euler('xyz')
         self.end_theta = eul[2]
-        self.find_traj = True
-        self.trajectory.clear()
+        self.reset()
         self.get_logger().info(str(self.end_x)+" "+str(self.end_y))
         #self.debug_points.poses = []
 
     def plan_path(self, path):
         #create trajectory 
+        self.trajectory.clear()
         trajectory = self.create_pose_array(path)
         self.trajectory.fromPoseArray(trajectory)
         self.traj_pub.publish(self.trajectory.toPoseArray())
@@ -386,6 +392,18 @@ class PathPlan(Node):
 
         return (path, length)
 
+    def reset(self):
+        #generate a completely new trajectory
+        self.find_traj = True
+        self.trajectory.clear()
+        self.best_traj_cost = None
+        self.best_traj = None
+    
+    def runTrajectory(self, trajectory):
+        self.plan_path(trajectory)
+        #self.find_traj = False
+        self.get_logger().info("path length: " +str(len(trajectory)))
+        self.nodes = 0
 
 class pathNode:
     def __init__(self, x, y, theta, parent=None, nodenumber = 0):
