@@ -54,6 +54,7 @@ class PathPlan(Node):
         self.num_iter = 800
         self.path_width = 0.4
         self.nodes = 0
+        self.radius = 3.0
 
         self.debug_points = PoseArray()
 
@@ -127,18 +128,41 @@ class PathPlan(Node):
                 #generate random point
                 x = random.uniform(self.x_min, self.x_max)
                 y = random.uniform(self.y_min, self.y_max)
-                theta = random.uniform(-math.pi/2, math.pi/2)
+                theta = random.uniform(-math.pi, math.pi)
                 #check if point is not in an obstacle
                 uv = self.xy_to_uv(x,y)
                 if self.map_data[uv[1], uv[0]] == 0:
                     no_valid_point = False
 
 
-            shortest_dist = 10000
             closest_node = None
+            cost = None
+            shortest_dist = 1000.0
+            nodes_in_rad = []
 
-            #find nearest node
+            # if len(nodes)>0: 
+            #     for node in nodes: #find the closest node
+            #         disp = math.sqrt((node.x-x)**2 + (node.y-y)**2)
+            #         if disp < shortest_dist: #if this node closer
+            #             shortest_dist = disp
+            #             closest_node = node
+
+
+            #find node within radius with the lowest cost 
             if len(nodes) > 0:
+                for node in nodes: #find the best parent node
+                    disp = math.sqrt((node.x-x)**2 + (node.y-y)**2)
+                    if disp < self.radius: #if node within the radius check the cost of connecting to that node
+                        nodes_in_rad.append(node)
+                        path, node_cost = self.backtrack(node) #calculate node cost (total path length)
+                        if cost is None: #if this node costs less connect to it 
+                            closest_node = node
+                            cost = node_cost
+                        elif node_cost < cost:
+                            closest_node = node
+                            cost = node_cost
+
+            if cost is None and len(nodes)>0: #if no nodes were within the radius
                 for node in nodes: #find the closest node
                     disp = math.sqrt((node.x-x)**2 + (node.y-y)**2)
                     if disp < shortest_dist: #if this node closer
@@ -147,10 +171,25 @@ class PathPlan(Node):
 
             #steer
             new_node = self.steer(x, y, theta, closest_node)
+
             if new_node is not None:
                 nodes.append(new_node)
             else:
                 continue
+            
+            #if new node is created 
+            #check if rewiring any of the nodes in the radius to be from the new node would reduce their cost
+            if len(nodes_in_rad) > 0:
+                for node_rad in nodes_in_rad:
+                    old_path, old_path_cost = self.backtrack(node_rad)
+                    new_node_to_node_rad = math.sqrt((new_node.x-node_rad.x)**2 + (new_node.y-node_rad.y)**2)
+                    new_path, new_path_cost = self.backtrack(new_node) 
+                    new_path_cost += new_node_to_node_rad
+                    if new_path_cost < old_path_cost: #if new path costs less check if there would be a collision if using it 
+                        no_collision = self.check_collision(node_rad.x, node_rad.y, new_node.x, new_node.y)
+                        if no_collision:
+                            node_rad.parent = new_node
+
             #check if node is within distance of end 
             end_disp = math.sqrt((new_node.x-self.end_x)**2 + (new_node.y-self.end_y)**2)
             if end_disp<self.step_size:
@@ -184,6 +223,7 @@ class PathPlan(Node):
             start_x = self.start_x
             start_y = self.start_y
             start_theta = self.start_theta
+            parent = pathNode(self.start_x, self.start_y, self.start_theta)
 
         #check if path is collision free
         collision_free = self.check_collision(goal_x, goal_y, start_x, start_y)
@@ -332,6 +372,19 @@ class PathPlan(Node):
             last_node = node
         return paths
         #self.traj_pub.publish(paths)
+
+    def backtrack(self, node):
+        #get the list of nodes in a path back to the start
+        path = []
+        path.append(node)
+        length = 0.0
+        current_node = node
+        while current_node.parent is not None:
+            path.append(current_node.parent)
+            length += math.sqrt((current_node.x-current_node.parent.x)**2 + (current_node.y-current_node.parent.y)**2)
+            current_node = current_node.parent
+
+        return (path, length)
 
 
 class pathNode:
