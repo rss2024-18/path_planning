@@ -10,6 +10,7 @@ import json
 from tf_transformations import euler_from_quaternion
 from collections import deque
 import math
+from numpy.linalg import inv
 
 EPSILON = 0.00000000001
 
@@ -262,61 +263,41 @@ class Map():
     """
     def __init__(self, msg, node) -> None:
         self.node = node
-        self.height = msg.info.height
-        self.width = msg.info.width
+        self.height = msg.info.height #1300
+        self.width = msg.info.width #1730
         self.resolution = msg.info.resolution
-        orientation = msg.info.origin.orientation
-        poseOrientation = [orientation.x, orientation.y, orientation.z, orientation.z]
+        self.orientation = msg.info.origin.orientation
+        poseOrientation = [self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.z]
         self.angles = euler_from_quaternion(poseOrientation)
         self.posePoint = np.array([[msg.info.origin.position.x], [msg.info.origin.position.y], [msg.info.origin.position.z]])
-        self.data = np.reshape(np.array(msg.data), (self.height, self.width))
+        self.map_translation = (msg.info.origin.position.x, msg.info.origin.position.y)
+        self.data = np.array(msg.data).reshape((self.height, self.width))
+        self.transformation_matrix = None
 
     def z_axis_rotation_matrix(self, yaw):
         return np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    
+    def transformation_matrix_p2r(self):
+        rotation_matrix = self.z_axis_rotation_matrix(self.angles[2])
+        rotation_matrix[0][2] = self.map_translation[0]
+        rotation_matrix[1][2] = self.map_translation[1]
+        diagonal_values = [self.resolution, self.resolution, 1]
+        scaling_matrix = np.diag(diagonal_values)
+        return np.matmul(rotation_matrix, scaling_matrix)
 
-    def pixel_to_real(self, pixelCoord):
-        pixelCoord = [i*self.resolution for i in pixelCoord]
-        rotatedCoord = np.array([pixelCoord[0], pixelCoord[1], 0.0]) @ self.z_axis_rotation_matrix(self.angles[2])
-        rotatedCoord = rotatedCoord + self.posePoint
-        return (rotatedCoord[0, 0], rotatedCoord[1, 0])      
+    def pixel_to_real(self, pixelCoord: Tuple[int, int]) -> Tuple[float, float]:
+        self.transformation_matrix = self.transformation_matrix_p2r()
+        new_pcoord = (pixelCoord[0], pixelCoord[1], 0.0)
+        coords = np.matmul(self.transformation_matrix, new_pcoord)
+        return self.discretization(coords[0], coords[1])
 
-    def real_to_pixel(self, realCoord):
-        #test
-        # self.node.get_logger().info("Converting real world coordinates to pixel coordinates: " + str(realCoord))
-        translatedCoord = np.array([[realCoord[0]], [realCoord[1]], [0.0]]) - self.posePoint
-
-        # Apply the rotation matrix (proper matrix multiplication)
-        rotatedCoord = self.z_axis_rotation_matrix(-self.angles[2]) @ translatedCoord
-
-        # Divide by the resolution to convert to pixel coordinates
-        pixelCoord = rotatedCoord / self.resolution
-
-        # Round and convert to integers to get the final pixel indices
-        u, v = int(round(pixelCoord[0, 0])), int(round(pixelCoord[1, 0]))
-        return (u, v)
+    def real_to_pixel(self, realCoord: Tuple[float, float]) -> Tuple[int, int]:
+        self.transformation_matrix = self.transformation_matrix_p2r()
+        new_rcoord = (realCoord[0], realCoord[1], 0.0)
+        return np.matmul(inv(self.transformation_matrix), new_rcoord)
     
     def get_pixel(self, u, v):
-        return self.data[v, u]
-    
-    def bfs(self, start_point, end_point):
-
-        start_point = self.discretization(start_point.x, start_point.y)
-        end_point = self.discretization(end_point.x, end_point.y)
-
-        visited = set() 
-        queue = deque([(start_point, [start_point])])
-        
-        while queue:
-            node, path = queue.popleft()
-            if node == end_point:
-                return path
-                
-            if node not in visited:
-                visited.add(node)
-                
-                for neighbor in self.get_neighbors(node[0], node[1]):
-                    if neighbor not in visited:
-                        queue.append((neighbor, path + [neighbor]))
+        return self.data[v][u]
 
     def discretization(self, x, y):
         return (math.floor(x) + 0.5, math.floor(y) + 0.5)
@@ -339,6 +320,7 @@ class Map():
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) * 10
     
     def a_star(self, start, end):
+        return self.real_to_pixel(start)
         start = self.discretization(start[0], start[1])
         end = self.discretization(end[0], end[1])
 
@@ -355,6 +337,7 @@ class Map():
                 break
 
             # Correctly unpack all three values returned from get_neighbors
+            return self.get_neighbors(current[0], current[1])
             for nx, ny, move_cost in self.get_neighbors(current[0], current[1]):
                 next_pos = (nx, ny)
                 new_cost = cost_so_far[current] + move_cost
