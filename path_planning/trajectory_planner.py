@@ -6,6 +6,9 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
 from .utils import LineTrajectory, Map
 
+from scipy.ndimage import binary_dilation
+import numpy as np
+
 
 class PathPlan(Node):
     """ Listens for goal pose published by RViz and uses it to plan a path from
@@ -54,8 +57,11 @@ class PathPlan(Node):
         self.map = None
 
     def map_cb(self, msg):
-        self.map = Map(msg, Node)
+        self.map = Map(msg, self)
         # self.get_logger().info(self.map)
+        struct_element = np.ones((5,5))
+        dilated_map = binary_dilation(map_data, structure=struct_element).astype(np.uint8)
+        self.map_data= dilated_map
         
     def pose_cb(self, msg):
         self.start = (msg.pose.pose.position.x, msg.pose.pose.position.y)
@@ -68,18 +74,16 @@ class PathPlan(Node):
             path = self.plan_path(self.start, self.end, self.map)
 
     def plan_path(self, start_point, end_point, map):
-        self.get_logger().info("Start" + str(map.discretization(start_point[0], start_point[1])))
         path = self.map.a_star(start_point, end_point)
-        self.get_logger().info("Orientation" + str(path))
-        # self.trajectory.clear()
-        # if path is not None and len(path) > 0:
-        #     for point in path:
-        #         self.trajectory.addPoint(point)
-        # else:
-        #     self.get_logger().info("path not found")
-        #     return
-        # self.traj_pub.publish(self.trajectory.toPoseArray())
-        # self.trajectory.publish_viz()
+        self.trajectory.clear()
+        if path is not None and len(path) > 0:
+            for point in path:
+                self.trajectory.addPoint(point)
+        else:
+            # self.get_logger().info("path not found")
+            return
+        self.traj_pub.publish(self.trajectory.toPoseArray())
+        self.trajectory.publish_viz()
 
 
 def main(args=None):

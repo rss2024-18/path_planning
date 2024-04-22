@@ -31,9 +31,9 @@ class LineTrajectory:
 
         if viz_namespace:
             self.visualize = True
-            self.start_point_pub = self.node.create_publisher(Marker, viz_namespace + "/start_point_point", 1)
+            self.start_pub = self.node.create_publisher(Marker, viz_namespace + "/start_point", 1)
             self.traj_pub = self.node.create_publisher(Marker, viz_namespace + "/path", 1)
-            self.end_point_pub = self.node.create_publisher(Marker, viz_namespace + "/end_point_pose", 1)
+            self.end_pub = self.node.create_publisher(Marker, viz_namespace + "/end_pose", 1)
 
     # compute the distances along the path for all path segments beyond those already computed
     def update_distances(self):
@@ -42,14 +42,14 @@ class LineTrajectory:
 
         for i in range(num_distances, num_points):
             if i == 0:
-                self.distances.append_point(0)
+                self.distances.append(0)
             else:
                 p0 = self.points[i - 1]
                 p1 = self.points[i]
                 delta = np.array([p0[0] - p1[0], p0[1] - p1[1]])
-                self.distances.append_point(self.distances[i - 1] + np.linalg.norm(delta))
+                self.distances.append(self.distances[i - 1] + np.linalg.norm(delta))
 
-    def distance_to_end_point(self, t):
+    def distance_to_end(self, t):
         if not len(self.points) == len(self.distances):
             print(
                 "WARNING: Different number of distances and points, this should never happen! Expect incorrect results. See LineTrajectory class.")
@@ -73,7 +73,7 @@ class LineTrajectory:
 
     def addPoint(self, point: Tuple[float, float]) -> None:
         print("adding point to trajectory:", point)
-        self.points.append_point(point)
+        self.points.append(point)
         self.update_distances()
         self.mark_dirty()
 
@@ -90,7 +90,7 @@ class LineTrajectory:
         data = {}
         data["points"] = []
         for p in self.points:
-            data["points"].append_point({"x": p[0], "y": p[1]})
+            data["points"].append({"x": p[0], "y": p[1]})
         with open(path, 'w') as outfile:
             json.dump(data, outfile)
 
@@ -109,7 +109,7 @@ class LineTrajectory:
         with open(path) as json_file:
             json_data = json.load(json_file)
             for p in json_data["points"]:
-                self.points.append_point((p["x"], p["y"]))
+                self.points.append((p["x"], p["y"]))
         self.update_distances()
         print("Loaded:", len(self.points), "points")
         self.mark_dirty()
@@ -117,7 +117,7 @@ class LineTrajectory:
     # build a trajectory class instance from a trajectory message
     def fromPoseArray(self, trajMsg):
         for p in trajMsg.poses:
-            self.points.append_point((p.position.x, p.position.y))
+            self.points.append((p.position.x, p.position.y))
         self.update_distances()
         self.mark_dirty()
         print("Loaded new trajectory with:", len(self.points), "points")
@@ -130,14 +130,14 @@ class LineTrajectory:
             pose = Pose()
             pose.position.x = p[0]
             pose.position.y = p[1]
-            traj.poses.append_point(pose)
+            traj.poses.append(pose)
         return traj
 
-    def publish_start_point_point(self, duration=0.0, scale=0.1):
+    def publish_start_point(self, duration=0.0, scale=0.1):
         should_publish = len(self.points) > 0
-        self.node.get_logger().info("Before Publishing start_point point")
-        if self.visualize and self.start_point_pub.get_subscription_count() > 0:
-            self.node.get_logger().info("Publishing start_point point")
+        #self.node.get_logger().info("Before Publishing start point")
+        if self.visualize and self.start_pub.get_subscription_count() > 0:
+            #self.node.get_logger().info("Publishing start point")
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -160,13 +160,13 @@ class LineTrajectory:
                 # delete marker
                 marker.action = 2
 
-            self.start_point_pub.publish(marker)
-        elif self.start_point_pub.get_subscription_count() == 0:
-            self.node.get_logger().info("Not publishing start_point point, no subscribers")
+            self.start_pub.publish(marker)
+        elif self.start_pub.get_subscription_count() == 0:
+            self.node.get_logger().info("Not publishing start point, no subscribers")
 
-    def publish_end_point_point(self, duration=0.0):
+    def publish_end_point(self, duration=0.0):
         should_publish = len(self.points) > 1
-        if self.visualize and self.end_point_pub.get_subscription_count() > 0:
+        if self.visualize and self.end_pub.get_subscription_count() > 0:
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -189,14 +189,14 @@ class LineTrajectory:
                 # delete marker
                 marker.action = 2
 
-            self.end_point_pub.publish(marker)
-        elif self.end_point_pub.get_subscription_count() == 0:
-            print("Not publishing end_point point, no subscribers")
+            self.end_pub.publish(marker)
+        elif self.end_pub.get_subscription_count() == 0:
+            print("Not publishing end point, no subscribers")
 
     def publish_trajectory(self, duration=0.0):
         should_publish = len(self.points) > 1
         if self.visualize and self.traj_pub.get_subscription_count() > 0:
-            self.node.get_logger().info("Publishing trajectory")
+            #self.node.get_logger().info("Publishing trajectory")
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -215,7 +215,7 @@ class LineTrajectory:
                     pt.x = p[0]
                     pt.y = p[1]
                     pt.z = 0.0
-                    marker.points.append_point(pt)
+                    marker.points.append(pt)
             else:
                 # delete
                 marker.action = marker.DELETE
@@ -228,9 +228,9 @@ class LineTrajectory:
         if not self.visualize:
             print("Cannot visualize path, not initialized with visualization enabled")
             return
-        self.publish_start_point_point(duration=duration)
+        self.publish_start_point(duration=duration)
         self.publish_trajectory(duration=duration)
-        self.publish_end_point_point(duration=duration)
+        self.publish_end_point(duration=duration)
 
     def make_header(self, frame_id, stamp=None):
         if stamp == None:
@@ -267,11 +267,12 @@ class Map():
         self.width = msg.info.width #1730
         self.resolution = msg.info.resolution
         self.orientation = msg.info.origin.orientation
-        poseOrientation = [self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.z]
+        poseOrientation = [self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w]
         self.angles = euler_from_quaternion(poseOrientation)
         self.posePoint = np.array([[msg.info.origin.position.x], [msg.info.origin.position.y], [msg.info.origin.position.z]])
         self.map_translation = (msg.info.origin.position.x, msg.info.origin.position.y)
-        self.data = np.array(msg.data).reshape((self.height, self.width))
+        self.data = np.reshape(np.array(msg.data), (self.height, self.width))
+        self.raw_data = np.array(msg.data).shape
         self.transformation_matrix = None
 
     def z_axis_rotation_matrix(self, yaw):
@@ -287,14 +288,37 @@ class Map():
 
     def pixel_to_real(self, pixelCoord: Tuple[int, int]) -> Tuple[float, float]:
         self.transformation_matrix = self.transformation_matrix_p2r()
-        new_pcoord = (pixelCoord[0], pixelCoord[1], 0.0)
+        new_pcoord = (pixelCoord[0], pixelCoord[1], 1.0)
         coords = np.matmul(self.transformation_matrix, new_pcoord)
+        # self.node.get_logger().info("real_value: " + str(self.discretization(coords[0], coords[1])))
         return self.discretization(coords[0], coords[1])
 
     def real_to_pixel(self, realCoord: Tuple[float, float]) -> Tuple[int, int]:
         self.transformation_matrix = self.transformation_matrix_p2r()
-        new_rcoord = (realCoord[0], realCoord[1], 0.0)
-        return np.matmul(inv(self.transformation_matrix), new_rcoord)
+        new_rcoord = (realCoord[0], realCoord[1], 1.0)
+        x = np.matmul(inv(self.transformation_matrix), new_rcoord)
+        # self.node.get_logger().info("pixel_value: " + str(x.astype(int)))
+        return x.astype(int)
+        # x = realCoord[0]
+        # y = realCoord[1]
+        # xtrans = x-self.position.x
+        # ytrans = y-self.position.y
+        # xq = self.orientation.x
+        # yq = self.orientation.y
+        # zq = self.orientation.z
+        # wq = self.orientation.w
+        # rot = R.from_quat((xq,yq,zq,wq))
+        # eul = rot.as_euler('xyz')
+        # theta = eul[2]
+
+        # # Apply inverse rotation using the negative of the yaw
+        # x_rotated = xtrans * math.cos(-theta) - ytrans * math.sin(-theta)
+        # y_rotated = xtrans * math.sin(-theta) + ytrans * math.cos(-theta)
+
+        # # Scale (x_rotated, y_rotated) by the inverse of the resolution to get grid coordinates
+        # u = int(x_rotated / self.resolution)
+        # v = int(y_rotated / self.resolution)
+        # return (u,v)
     
     def get_pixel(self, u, v):
         return self.data[v][u]
@@ -308,8 +332,12 @@ class Map():
 
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
-            u, v = self.real_to_pixel((nx, ny))
-            if 0 <= u < self.width and 0 <= v < self.height and self.get_pixel(u, v) == 0:
+            # self.node.get_logger().info("NX, NY: " + str((nx, ny)))
+            u, v, b = self.real_to_pixel((nx, ny))
+            # self.node.get_logger().info("U, V: " + str((u, v)))
+            # self.node.get_logger().info("Free" if self.get_pixel(u, v) == 0 else "Occupied")
+            # if True:
+            if self.get_pixel(u, v) == 0:
                 move_cost = 14 if dx != 0 and dy != 0 else 10  # Diagonal moves cost 14, others cost 10
                 neighbors.append((nx, ny, move_cost))
         return neighbors
@@ -320,7 +348,6 @@ class Map():
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) * 10
     
     def a_star(self, start, end):
-        return self.real_to_pixel(start)
         start = self.discretization(start[0], start[1])
         end = self.discretization(end[0], end[1])
 
@@ -337,7 +364,7 @@ class Map():
                 break
 
             # Correctly unpack all three values returned from get_neighbors
-            return self.get_neighbors(current[0], current[1])
+            # self.node.get_logger().info("Neighbors: " + str(self.get_neighbors(current[0], current[1])))
             for nx, ny, move_cost in self.get_neighbors(current[0], current[1]):
                 next_pos = (nx, ny)
                 new_cost = cost_so_far[current] + move_cost
