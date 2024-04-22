@@ -4,7 +4,7 @@ from rclpy.node import Node
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
-from .utils import LineTrajectory
+from .utils import LineTrajectory, Map
 
 
 class PathPlan(Node):
@@ -49,17 +49,35 @@ class PathPlan(Node):
         )
 
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
+        self.start = None
+        self.end = None
+        self.map = None
 
     def map_cb(self, msg):
-        raise NotImplementedError
+        self.map = Map(msg, Node)
+        # self.get_logger().info(self.map)
 
-    def pose_cb(self, pose):
-        raise NotImplementedError
+    def pose_cb(self, msg):
+        self.start = (msg.pose.pose.position.x, msg.pose.pose.position.y)
+        # self.get_logger().info("Start Pose: " + str(self.start))
 
     def goal_cb(self, msg):
-        raise NotImplementedError
+        self.end = (msg.pose.position.x, msg.pose.position.y)
+        # self.get_logger().info("End Pose: " + str(self.end))
+        if self.map is not None and self.start is not None:
+            path = self.plan_path(self.start, self.end, self.map)
 
     def plan_path(self, start_point, end_point, map):
+        self.get_logger().info("Start")
+        path = self.map.a_star(start_point, end_point)
+        self.get_logger().info("End")
+        self.trajectory.clear()
+        if path is not None and len(path) > 0:
+            for point in path:
+                self.trajectory.addPoint(point)
+        else:
+            self.get_logger().info("path not found")
+            return
         self.traj_pub.publish(self.trajectory.toPoseArray())
         self.trajectory.publish_viz()
 
