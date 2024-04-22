@@ -56,7 +56,7 @@ class PathPlan(Node):
     def map_cb(self, msg):
         self.map = Map(msg, Node)
         # self.get_logger().info(self.map)
-
+        
     def pose_cb(self, msg):
         self.start = (msg.pose.pose.position.x, msg.pose.pose.position.y)
         # self.get_logger().info("Start Pose: " + str(self.start))
