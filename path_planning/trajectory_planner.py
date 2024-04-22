@@ -11,6 +11,7 @@ from std_msgs.msg import Float32MultiArray, Float32
 from nav_msgs.msg import OccupancyGrid
 from .utils import LineTrajectory
 from nav_msgs.msg import Odometry
+from scipy.ndimage import binary_dilation
 
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -328,10 +329,15 @@ class PathPlan(Node):
 
     def map_cb(self, msg):
         self.get_logger().info("got map data")
-        self.map_data = np.array(msg.data).reshape(msg.info.height, msg.info.width)
+        map_data = np.array(msg.data).reshape(msg.info.height, msg.info.width)
         self.resolution = msg.info.resolution
         self.orientation = msg.info.origin.orientation
         self.position = msg.info.origin.position
+
+        # Define the structuring element for dilation (a 3x3 square)
+        struct_element = np.ones((5,5))
+        dilated_map = binary_dilation(map_data, structure=struct_element).astype(np.uint8)
+        self.map_data= dilated_map
 
     
     def odom_cb(self, msg):
