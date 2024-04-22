@@ -53,9 +53,9 @@ class PathPlan(Node):
         self.max_steer = math.pi/2
         self.step_size = 0.5
         self.collision_step_size = 1.0
-        self.collision_width_ss = 0.1
+        self.collision_width_ss = 0.75/2
         self.num_iter = 1000
-        self.path_width = 0.4
+        self.path_width = 0.75
         self.nodes = 0
         self.radius = 3.0
 
@@ -276,13 +276,30 @@ class PathPlan(Node):
         #Calculate direction vector components
         direction_x = new_x - parent_x
         direction_y = new_y - parent_y
-
+        
+        norm = math.sqrt(direction_x ** 2 + direction_y ** 2)
+        # Normalize direction vector
+        dir_x = direction_x / norm
+        dir_y = direction_y / norm
+        
+        # Compute perpendicular (normal) vector to the direction
+        perp_x = -dir_y
+        perp_y = dir_x
         for i in range(num_iter+1):
             # Calculate intermediate point along the line
             t = self.collision_step_size * i / total_dist
             base_x = parent_x + t * direction_x
             base_y = parent_y + t * direction_y
-            points.append((base_x, base_y))
+            hi = 0
+            if (True):
+                for offset in np.linspace(-self.path_width / 2, self.path_width / 2, num=int(self.path_width/self.collision_width_ss)):  
+                    x = base_x + offset * perp_x
+                    y = base_y + offset * perp_y
+                    points.append((x, y))
+                    hi += 1
+                
+            #self.get_logger().info(str(hi))
+
 
         no_collision = True
         for point in points:
