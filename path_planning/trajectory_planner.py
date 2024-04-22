@@ -60,14 +60,14 @@ class PathPlan(Node):
         self.start = (pose.pose.pose.position.x, pose.pose.pose.position.y)
 
     def goal_cb(self, msg):
-        self.end = (msg.point.x, msg.point.y)
+        self.end = msg.pose.position
         if self.map is not None and self.start is not None:
             self.plan_path()
 
     def plan_path(self):
         path = self.map.bfs(self.start, self.end)
         self.trajectory.clear()
-        if len(path) > 0:
+        if path is not None and len(path) > 0:
             for point in path:
                 self.trajectory.addPoint(point)
         else:
