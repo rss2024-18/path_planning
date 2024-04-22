@@ -2,9 +2,12 @@ import rclpy
 import random
 import math
 from rclpy.node import Node
+import time
+
 
 assert rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray, Pose, Point, Quaternion
+from std_msgs.msg import Float32MultiArray, Float32
 from nav_msgs.msg import OccupancyGrid
 from .utils import LineTrajectory
 from nav_msgs.msg import Odometry
@@ -58,6 +61,10 @@ class PathPlan(Node):
         self.debug_points = PoseArray()
         self.best_traj = None
         self.best_traj_cost = None
+        self.start_time = time.time()
+        self.tot_iter = 0.0
+        self.total_points = 0.0
+        self.total_nodes = 0.0
 
         self.map_sub = self.create_subscription(
             OccupancyGrid,
@@ -89,6 +96,17 @@ class PathPlan(Node):
             "/trajectory/current",
             10
         )
+        
+        self.data_pub = self.create_publisher(
+            Float32MultiArray,
+            "/data",
+            10
+        )
+        self.all_data_pub = self.create_publisher(
+            Float32MultiArray,
+            "/all_data",
+            10
+        )
 
         #"/trajectory/current",
         self.pose_sub = self.create_subscription(
@@ -99,7 +117,7 @@ class PathPlan(Node):
         )
 
         self.trajectory = LineTrajectory(node=self, viz_namespace="/planned_trajectory")
-        timer_period = 1/10 #seconds
+        timer_period = 1/20 #seconds
         self.t = 0
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
@@ -120,6 +138,7 @@ class PathPlan(Node):
             return
         nodes = []
         self.t = self.t + 1
+        self.tot_iter += 1
         for it in range(self.num_iter):
             no_valid_point =True
             x = None
@@ -134,6 +153,7 @@ class PathPlan(Node):
                 uv = self.xy_to_uv(x,y)
                 if self.map_data[uv[1], uv[0]] == 0:
                     no_valid_point = False
+                    self.total_points += 1
 
 
             closest_node = None
@@ -175,6 +195,7 @@ class PathPlan(Node):
 
             if new_node is not None:
                 nodes.append(new_node)
+                self.total_nodes += 1
             else:
                 continue
             
@@ -208,6 +229,7 @@ class PathPlan(Node):
                     #self.rand_pub.publish(self.debug_points) 
                     #evaluate this trajectory:
                     new_traj, new_traj_cost = self.backtrack(end_node)
+                    self.dataPub(new_traj, new_traj_cost)
                     if self.best_traj_cost is None: #this new trajectory is the first we've found
                         self.best_traj_cost = new_traj_cost
                         self.best_traj = trajectory
@@ -250,7 +272,7 @@ class PathPlan(Node):
         num_iter = int(total_dist/self.collision_step_size)
         points = []
 
-        # # Calculate direction vector components
+        #Calculate direction vector components
         direction_x = new_x - parent_x
         direction_y = new_y - parent_y
 
@@ -328,6 +350,7 @@ class PathPlan(Node):
         eul = rot.as_euler('xyz')
         self.start_theta = eul[2]
         self.reset()
+        self.get_logger().info("start " + str(self.start_x)+" "+str(self.start_y))
         #self.debug_points.poses = []
 
 
@@ -343,7 +366,7 @@ class PathPlan(Node):
         eul = rot.as_euler('xyz')
         self.end_theta = eul[2]
         self.reset()
-        self.get_logger().info(str(self.end_x)+" "+str(self.end_y))
+        self.get_logger().info("goal " + str(self.end_x)+" "+str(self.end_y))
         #self.debug_points.poses = []
 
     def plan_path(self, path):
@@ -403,7 +426,19 @@ class PathPlan(Node):
         self.plan_path(trajectory)
         #self.find_traj = False
         self.get_logger().info("path length: " +str(len(trajectory)))
+        self.dataPub(trajectory, self.best_traj_cost, best=True)
         self.nodes = 0
+    
+    def dataPub(self, trajectory, trajectory_cost, best = False):
+        msg = Float32MultiArray()
+        current_time = time.time()
+        elapsed = current_time - self.start_time
+        msg.data = [float(elapsed), float(self.tot_iter), float(trajectory_cost), float(len(trajectory)), float(self.total_points), float(self.total_nodes)]
+        if best:
+            self.data_pub.publish(msg)
+            self.all_data_pub.publish(msg)
+        else:
+            self.all_data_pub.publish(msg)
 
 class pathNode:
     def __init__(self, x, y, theta, parent=None, nodenumber = 0):
