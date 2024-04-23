@@ -63,6 +63,7 @@ class PathPlan(Node):
         self.best_traj = None
         self.best_traj_cost = None
         self.start_time = time.time()
+        self.run_time = None
         self.tot_iter = 0.0
         self.total_points = 0.0
         self.total_nodes = 0.0
@@ -125,6 +126,9 @@ class PathPlan(Node):
     def timer_callback(self):
         if self.map_data is None:
             return
+        if self.run_time is None:
+            self.run_time = time.time()
+            self.run_time = self.run_time - self.start_time
         #obstacle checking
         # x = self.end_x
         # y= self.end_y
@@ -291,12 +295,14 @@ class PathPlan(Node):
             base_x = parent_x + t * direction_x
             base_y = parent_y + t * direction_y
             hi = 0
-            if (True):
+            if (False):
                 for offset in np.linspace(-self.path_width / 2, self.path_width / 2, num=int(self.path_width/self.collision_width_ss)):  
                     x = base_x + offset * perp_x
                     y = base_y + offset * perp_y
                     points.append((x, y))
                     hi += 1
+            else:
+                points.append((base_x, base_y))
                 
             #self.get_logger().info(str(hi))
 
@@ -352,7 +358,8 @@ class PathPlan(Node):
         self.position = msg.info.origin.position
 
         # Define the structuring element for dilation (a 3x3 square)
-        struct_element = np.ones((5,5))
+        struct_element = np.ones((20, 20))
+        #struct_element = np.ones((5, 5))
         dilated_map = binary_dilation(map_data, structure=struct_element).astype(np.uint8)
         self.map_data= dilated_map
 
@@ -456,7 +463,7 @@ class PathPlan(Node):
         msg = Float32MultiArray()
         current_time = time.time()
         elapsed = current_time - self.start_time
-        msg.data = [float(elapsed), float(self.tot_iter), float(trajectory_cost), float(len(trajectory)), float(self.total_points), float(self.total_nodes)]
+        msg.data = [float(elapsed), float(self.tot_iter), float(trajectory_cost), float(len(trajectory)), float(self.total_points), float(self.total_nodes), float(self.run_time)]
         if best:
             self.data_pub.publish(msg)
             self.all_data_pub.publish(msg)
