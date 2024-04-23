@@ -8,6 +8,7 @@ import os
 from typing import List, Tuple
 import json
 from tf_transformations import euler_from_quaternion
+from scipy.spatial.transform import Rotation as R
 import math
 
 EPSILON = 0.00000000001
@@ -242,14 +243,15 @@ class Map:
     """
     2D map discretization Abstract Data Type
     """
-    def __init__(self, msg) -> None:
+    def __init__(self, msg, node) -> None:
         
+        self.node = node
         self.height = msg.info.height
         self.width = msg.info.width
         self.resolution = msg.info.resolution
         orientation = msg.info.origin.orientation
-        poseOrientation = [orientation.x, orientation.y, orientation.z, orientation.z]
-        self.angles = euler_from_quaternion(poseOrientation)
+        self.poseOrientation = [orientation.x, orientation.y, orientation.z, orientation.w]
+        self.angles = euler_from_quaternion(self.poseOrientation)
         self.posePoint = np.array([[msg.info.origin.position.x], [msg.info.origin.position.y], [msg.info.origin.position.z]])
         self.data = np.array(msg.data).reshape((self.height, self.width))
 
@@ -263,11 +265,22 @@ class Map:
         return (rotatedCoord[0, 0], rotatedCoord[1, 0])      
 
     def real_to_pixel(self, realCoord: Tuple[float, float]) -> Tuple[int, int]:
-        translatedCoord = np.array([[realCoord[0]], [realCoord[1]], [0.0]]) - self.posePoint
-        rotatedCoord = np.array([[translatedCoord[0]], [translatedCoord[1]], [0.0]]) * self.z_axis_rotation_matrix(self.angles[2])
-        rotatedCoord = rotatedCoord / self.resolution
-        u, v = rotatedCoord[0, 0], rotatedCoord[1, 0]
-        return (int(round(u[0])), int(round(v[0]))) 
+
+        x, y = realCoord
+        
+        xtrans = x-self.posePoint[0]
+        ytrans = y-self.posePoint[1]
+        theta = self.angles[2]
+
+        # Apply inverse rotation using the negative of the yaw
+        x_rotated = xtrans * math.cos(-theta) - ytrans * math.sin(-theta)
+        y_rotated = xtrans * math.sin(-theta) + ytrans * math.cos(-theta)
+
+        # Scale (x_rotated, y_rotated) by the inverse of the resolution to get grid coordinates
+        u = int(abs(x_rotated) / self.resolution)
+        v = int(y_rotated / self.resolution)
+
+        return (u, v) 
     
     def get_pixel(self, u, v):
         return self.data[v][u]
@@ -295,12 +308,11 @@ class Map:
 
     def get_neighbors(self, x, y):
         neighbors = []
-        directions = [(-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)]
-
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0), (-1, 1), (1, 1), (1, -1), (-1, -1)]
         for dx, dy in directions:
             nx, ny = x + dx, y + dy
             u, v = self.real_to_pixel((nx, ny))
-            if True: #0 <= u < self.width and 0 <= v < self.height and self.get_pixel(u, v) == 0:
+            if (-self.width <= u and u < self.width) and (-self.height <= v and v < self.height) and self.get_pixel(u, v) == 0:
                 neighbors.append((nx, ny))
 
         return neighbors
