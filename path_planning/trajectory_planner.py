@@ -54,7 +54,7 @@ class PathPlan(Node):
         self.map = None
 
     def map_cb(self, msg):
-        self.map = Map(msg)
+        self.map = Map(msg, self)
 
     def pose_cb(self, pose):
         self.start = (pose.pose.pose.position.x, pose.pose.pose.position.y)
