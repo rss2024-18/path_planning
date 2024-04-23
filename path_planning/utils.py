@@ -11,6 +11,7 @@ from tf_transformations import euler_from_quaternion
 from collections import deque
 import math
 from numpy.linalg import inv
+from scipy.ndimage import binary_dilation
 
 EPSILON = 0.00000000001
 
@@ -275,6 +276,11 @@ class Map():
         self.raw_data = np.array(msg.data).shape
         self.transformation_matrix = None
 
+    def dilate_map(self):
+        struct_element = np.ones((5, 5))
+        dilated_map = binary_dilation(self.data, structure=struct_element).astype(np.uint8)
+        return dilated_map
+
     def z_axis_rotation_matrix(self, yaw):
         return np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
     
@@ -331,7 +337,8 @@ class Map():
         directions = [(-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)]
 
         for dx, dy in directions:
-            nx, ny = x + dx, y + dy
+            # nx, ny = x + dx/2, y + dy/2
+            nx, ny = x + dx/2, y + dy/2
             # self.node.get_logger().info("NX, NY: " + str((nx, ny)))
             u, v, b = self.real_to_pixel((nx, ny))
             # self.node.get_logger().info("U, V: " + str((u, v)))
@@ -348,6 +355,7 @@ class Map():
         return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) * 10
     
     def a_star(self, start, end):
+        self.data = self.dilate_map()
         start = self.discretization(start[0], start[1])
         end = self.discretization(end[0], end[1])
 
