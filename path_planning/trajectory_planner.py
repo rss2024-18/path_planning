@@ -6,7 +6,8 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped, PoseArray
 from nav_msgs.msg import OccupancyGrid
 from .utils import LineTrajectory, Map
 
-from scipy.ndimage import binary_dilation
+import time
+
 import numpy as np
 
 
@@ -59,9 +60,6 @@ class PathPlan(Node):
     def map_cb(self, msg):
         self.map = Map(msg, self)
         # self.get_logger().info(self.map)
-        struct_element = np.ones((5,5))
-        dilated_map = binary_dilation(map_data, structure=struct_element).astype(np.uint8)
-        self.map_data= dilated_map
         
     def pose_cb(self, msg):
         self.start = (msg.pose.pose.position.x, msg.pose.pose.position.y)
