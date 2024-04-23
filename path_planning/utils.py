@@ -305,26 +305,6 @@ class Map():
         x = np.matmul(inv(self.transformation_matrix), new_rcoord)
         # self.node.get_logger().info("pixel_value: " + str(x.astype(int)))
         return x.astype(int)
-        # x = realCoord[0]
-        # y = realCoord[1]
-        # xtrans = x-self.position.x
-        # ytrans = y-self.position.y
-        # xq = self.orientation.x
-        # yq = self.orientation.y
-        # zq = self.orientation.z
-        # wq = self.orientation.w
-        # rot = R.from_quat((xq,yq,zq,wq))
-        # eul = rot.as_euler('xyz')
-        # theta = eul[2]
-
-        # # Apply inverse rotation using the negative of the yaw
-        # x_rotated = xtrans * math.cos(-theta) - ytrans * math.sin(-theta)
-        # y_rotated = xtrans * math.sin(-theta) + ytrans * math.cos(-theta)
-
-        # # Scale (x_rotated, y_rotated) by the inverse of the resolution to get grid coordinates
-        # u = int(x_rotated / self.resolution)
-        # v = int(y_rotated / self.resolution)
-        # return (u,v)
     
     def get_pixel(self, u, v):
         return self.data[v][u]
