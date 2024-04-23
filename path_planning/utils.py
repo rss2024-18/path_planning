@@ -277,7 +277,7 @@ class Map():
         self.transformation_matrix = None
 
     def dilate_map(self):
-        struct_element = np.ones((5, 5))
+        struct_element = np.ones((11, 11))
         dilated_map = binary_dilation(self.data, structure=struct_element).astype(np.uint8)
         return dilated_map
 
@@ -338,6 +338,9 @@ class Map():
         self.data = self.dilate_map()
         start = self.discretization(start[0], start[1])
         end = self.discretization(end[0], end[1])
+
+        start = self.discretization(11.094404220581055, -1.1191177368164062)
+        end = self.discretization(-16.592947006225586, 25.76806640625)
 
         frontier = [(0, start)]
         came_from = {start: None}
