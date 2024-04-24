@@ -1,0 +1,19 @@
+rosbag2_bagfile_information:
+  version: 4
+  storage_identifier: sqlite3
+  relative_file_paths:
+    - test_1.0_trial_1_0.db3
+  duration:
+    nanoseconds: 26560841376
+  starting_time:
+    nanoseconds_since_epoch: 1713931504494097056
+  message_count: 706
+  topics_with_message_count:
+    - topic_metadata:
+        name: /error
+        type: std_msgs/msg/Float32
+        serialization_format: cdr
+        offered_qos_profiles: "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n  deadline:\n    sec: 2147483647\n    nsec: 4294967295\n  lifespan:\n    sec: 2147483647\n    nsec: 4294967295\n  liveliness: 1\n  liveliness_lease_duration:\n    sec: 2147483647\n    nsec: 4294967295\n  avoid_ros_namespace_conventions: false"
+      message_count: 706
+  compression_format: ""
+  compression_mode: ""
