@@ -8,9 +8,10 @@ import os
 from typing import List, Tuple
 import json
 from tf_transformations import euler_from_quaternion
-from scipy.spatial.transform import Rotation as R
-from scipy.ndimage import binary_dilation
+from collections import deque
 import math
+from numpy.linalg import inv
+from scipy.ndimage import binary_dilation
 
 EPSILON = 0.00000000001
 
@@ -135,9 +136,9 @@ class LineTrajectory:
 
     def publish_start_point(self, duration=0.0, scale=0.1):
         should_publish = len(self.points) > 0
-        self.node.get_logger().info("Before Publishing start point")
+        #self.node.get_logger().info("Before Publishing start point")
         if self.visualize and self.start_pub.get_subscription_count() > 0:
-            self.node.get_logger().info("Publishing start point")
+            #self.node.get_logger().info("Publishing start point")
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -196,7 +197,7 @@ class LineTrajectory:
     def publish_trajectory(self, duration=0.0):
         should_publish = len(self.points) > 1
         if self.visualize and self.traj_pub.get_subscription_count() > 0:
-            self.node.get_logger().info("Publishing trajectory")
+            #self.node.get_logger().info("Publishing trajectory")
             marker = Marker()
             marker.header = self.make_header("/map")
             marker.ns = self.viz_namespace + "/trajectory"
@@ -240,87 +241,138 @@ class LineTrajectory:
         header.frame_id = frame_id
         return header
 
-class Map:
+# class Coordinate2D:
+#     """
+#     2D coordinate object used in Map representation
+#     """
+#     def __init__(self, x: float=0.0, y: float=0.0):
+#         self.x = x
+#         self.y = y
+
+#     def __str__(self):
+#         return f"({self.x}, {self.y})"
+
+#     def __eq__(self, other):
+#         return self.x == other.x and self.y == other.y
+    
+#     def scalar_multiply(self, scalar):
+#         return Coordinate2D(self.x * scalar, self.y * scalar)
+
+class Map():
     """
     2D map discretization Abstract Data Type
     """
     def __init__(self, msg, node) -> None:
-        
         self.node = node
-        self.height = msg.info.height
-        self.width = msg.info.width
+        self.height = msg.info.height #1300
+        self.width = msg.info.width #1730
         self.resolution = msg.info.resolution
-        orientation = msg.info.origin.orientation
-        self.poseOrientation = [orientation.x, orientation.y, orientation.z, orientation.w]
-        self.angles = euler_from_quaternion(self.poseOrientation)
+        self.orientation = msg.info.origin.orientation
+        poseOrientation = [self.orientation.x, self.orientation.y, self.orientation.z, self.orientation.w]
+        self.angles = euler_from_quaternion(poseOrientation)
         self.posePoint = np.array([[msg.info.origin.position.x], [msg.info.origin.position.y], [msg.info.origin.position.z]])
-        self.data = np.array(msg.data).reshape((self.height, self.width))
+        self.map_translation = (msg.info.origin.position.x, msg.info.origin.position.y)
+        self.data = np.reshape(np.array(msg.data), (self.height, self.width))
+        self.raw_data = np.array(msg.data).shape
+        self.transformation_matrix = None
 
     def dilate_map(self):
-        struct_element = np.ones((5, 5))
+        struct_element = np.ones((11, 11))
         dilated_map = binary_dilation(self.data, structure=struct_element).astype(np.uint8)
         return dilated_map
 
     def z_axis_rotation_matrix(self, yaw):
         return np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+    
+    def transformation_matrix_p2r(self):
+        rotation_matrix = self.z_axis_rotation_matrix(self.angles[2])
+        rotation_matrix[0][2] = self.map_translation[0]
+        rotation_matrix[1][2] = self.map_translation[1]
+        diagonal_values = [self.resolution, self.resolution, 1]
+        scaling_matrix = np.diag(diagonal_values)
+        return np.matmul(rotation_matrix, scaling_matrix)
 
     def pixel_to_real(self, pixelCoord: Tuple[int, int]) -> Tuple[float, float]:
-        pixelCoord = [i*self.resolution for i in pixelCoord]
-        rotatedCoord = np.array([pixelCoord[0]], [pixelCoord[1]], [0.0]) * self.z_axis_rotation_matrix(self.angles[2])
-        rotatedCoord = rotatedCoord + self.posePoint
-        return (rotatedCoord[0, 0], rotatedCoord[1, 0])      
+        self.transformation_matrix = self.transformation_matrix_p2r()
+        new_pcoord = (pixelCoord[0], pixelCoord[1], 1.0)
+        coords = np.matmul(self.transformation_matrix, new_pcoord)
+        # self.node.get_logger().info("real_value: " + str(self.discretization(coords[0], coords[1])))
+        return self.discretization(coords[0], coords[1])
 
     def real_to_pixel(self, realCoord: Tuple[float, float]) -> Tuple[int, int]:
-
-        x, y = realCoord
-        
-        xtrans = x-self.posePoint[0]
-        ytrans = y-self.posePoint[1]
-        theta = self.angles[2]
-
-        # Apply inverse rotation using the negative of the yaw
-        x_rotated = xtrans * math.cos(-theta) - ytrans * math.sin(-theta)
-        y_rotated = xtrans * math.sin(-theta) + ytrans * math.cos(-theta)
-
-        # Scale (x_rotated, y_rotated) by the inverse of the resolution to get grid coordinates
-        u = int(abs(x_rotated) / self.resolution)
-        v = int(y_rotated / self.resolution)
-
-        return (u, v) 
+        self.transformation_matrix = self.transformation_matrix_p2r()
+        new_rcoord = (realCoord[0], realCoord[1], 1.0)
+        x = np.matmul(inv(self.transformation_matrix), new_rcoord)
+        # self.node.get_logger().info("pixel_value: " + str(x.astype(int)))
+        return x.astype(int)
     
     def get_pixel(self, u, v):
         return self.data[v][u]
-    
-    def bfs(self, start_point, end_point):
-
-        start_point = self.discretization(start_point[0], start_point[1])
-        end_point = self.discretization(end_point.x, end_point.y)
-
-        self.data = self.dilate_map()
-
-        visited = set(start_point) 
-        queue = [(start_point, [start_point])]
-        
-        while queue:
-            node, path = queue.pop(0)
-            if node == end_point:
-                return path   
-                
-            for neighbor in self.get_neighbors(node[0], node[1]):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, path + [neighbor]))
 
     def discretization(self, x, y):
         return (math.floor(x) + 0.5, math.floor(y) + 0.5)
 
     def get_neighbors(self, x, y):
         neighbors = []
-        directions = [(0, 1), (1, 0), (0, -1), (-1, 0), (-1, 1), (1, 1), (1, -1), (-1, -1)]
-        for dx, dy in directions:
-            nx, ny = x + dx, y + dy
-            u, v = self.real_to_pixel((nx, ny))
-            if (-self.width <= u and u < self.width) and (-self.height <= v and v < self.height) and self.get_pixel(u, v) == 0:
-                neighbors.append((nx, ny))
+        directions = [(-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)]
 
+        for dx, dy in directions:
+            # nx, ny = x + dx/2, y + dy/2
+            nx, ny = x + dx/2, y + dy/2
+            # self.node.get_logger().info("NX, NY: " + str((nx, ny)))
+            u, v, b = self.real_to_pixel((nx, ny))
+            # self.node.get_logger().info("U, V: " + str((u, v)))
+            # self.node.get_logger().info("Free" if self.get_pixel(u, v) == 0 else "Occupied")
+            # if True:
+            if self.get_pixel(u, v) == 0:
+                move_cost = 14 if dx != 0 and dy != 0 else 10  # Diagonal moves cost 14, others cost 10
+                neighbors.append((nx, ny, move_cost))
         return neighbors
+    
+    def heuristic(self, a, b):
+        (x1, y1) = a
+        (x2, y2) = b
+        return math.sqrt((x1 - x2)**2 + (y1 - y2)**2) * 10
+    
+    def a_star(self, start, end):
+        self.data = self.dilate_map()
+        start = self.discretization(start[0], start[1])
+        end = self.discretization(end[0], end[1])
+
+        start = self.discretization(11.094404220581055, -1.1191177368164062)
+        end = self.discretization(-16.592947006225586, 25.76806640625)
+
+        frontier = [(0, start)]
+        came_from = {start: None}
+        cost_so_far = {start: 0}
+
+        while frontier:
+        # Sort and pop the lowest cost item
+            frontier.sort(key=lambda x: x[0])
+            current = frontier.pop(0)[1]
+
+            if current == end:
+                break
+
+            # Correctly unpack all three values returned from get_neighbors
+            # self.node.get_logger().info("Neighbors: " + str(self.get_neighbors(current[0], current[1])))
+            for nx, ny, move_cost in self.get_neighbors(current[0], current[1]):
+                next_pos = (nx, ny)
+                new_cost = cost_so_far[current] + move_cost
+                if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
+                    cost_so_far[next_pos] = new_cost
+                    priority = new_cost + self.heuristic(end, next_pos)
+                    frontier.append((priority, next_pos))
+                    came_from[next_pos] = current
+
+        return self.reconstruct_path(came_from, start, end)
+
+    def reconstruct_path(self, came_from, start, end):
+        current = end
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from.get(current)
+        path.append(start)
+        path.reverse()
+        return path
